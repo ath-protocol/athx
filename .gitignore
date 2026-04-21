@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.tgz
+.DS_Store
+
+# Test artifacts
+providers.json
+
+# IDE
+.vscode/
+.idea/
+
+# Vitest cache
+.vite/
