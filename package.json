@@ -18,6 +18,7 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
+    "test:e2e": "vitest run --dir test/e2e",
     "dev": "tsx src/cli/main.ts"
   },
   "dependencies": {

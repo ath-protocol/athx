@@ -2,17 +2,22 @@
  * E2E Test: athx CLI — both gateway and native mode.
  *
  * athx is a standalone repository. This suite requires the following external
- * components to be available alongside it (e.g. checked out next to athx and
- * wired into a local pnpm workspace, or vendored):
- *   - ath-protocol/gateway          — reference gateway server + bundled mock OAuth2
+ * components to be available at the paths referenced below (typically by
+ * cloning / vendoring into `packages/gateway` and `packages/mock-oauth`):
+ *   - ath-protocol/gateway          — reference gateway server
  *     (https://github.com/ath-protocol/gateway)
+ *   - mock OAuth2 server            — bundled as `vendor/mock-oauth` in the
+ *     gateway repo above; expected here at `packages/mock-oauth`
  *   - @ath-protocol/server          — native-mode ATH handlers
  *     (https://github.com/ath-protocol/typescript-sdk)
  *
  * Starts three real HTTP servers, then exercises athx through the full
  * trusted handshake in both deployment modes. No mock/stub behavior.
  *
- * See the README "Running end-to-end tests" section for setup details.
+ * Run with:
+ *   pnpm test:e2e     # opt-in, requires the external sources above
+ *
+ * Unit tests live in `test/unit/` and run with `pnpm test`.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFile } from "node:child_process";
@@ -52,7 +57,7 @@ const OAUTH_URL = `http://localhost:${OAUTH_PORT}`;
 const NATIVE_URL = `http://localhost:${NATIVE_PORT}`;
 const AGENT_ID = "https://athx-e2e-test.example.com/.well-known/agent.json";
 
-const CLI_PATH = path.resolve(import.meta.dirname, "../dist/cli/main.js");
+const CLI_PATH = path.resolve(import.meta.dirname, "../../dist/cli/main.js");
 
 let gatewayServer: ServerType;
 let oauthServer: ServerType;
