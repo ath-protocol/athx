@@ -9,13 +9,26 @@ export const statusCommand = new Command("status")
     try {
       const config = loadConfig();
       const store = loadCredentialStore(config);
-      const gatewayUrl = config.getGatewayUrl(opts.gateway);
+      const resolution = config.resolveGateway(opts.gateway);
 
-      if (!gatewayUrl) {
+      if (resolution.kind === "unknown-name") {
+        const known =
+          resolution.knownNames.length === 0
+            ? "(none configured)"
+            : resolution.knownNames.join(", ");
+        console.log(
+          `Unknown gateway name '${resolution.name}'. Known gateways: ${known}.`,
+        );
+        console.log("Use: athx config set-gateway <name> <url> to add one.");
+        return;
+      }
+
+      if (resolution.kind === "none") {
         console.log("No gateway configured. Run: athx config set-gateway <name> <url>");
         return;
       }
 
+      const gatewayUrl = resolution.url;
       const creds = store.getCredentials(gatewayUrl);
 
       if (opts.format === "json") {
