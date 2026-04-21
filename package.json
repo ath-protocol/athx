@@ -1,0 +1,47 @@
+{
+  "name": "athx",
+  "version": "0.2.0",
+  "description": "Headless CLI client for the ATH (Agent Trust Handshake) protocol — gateway and native mode",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "athx": "./dist/cli/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "dev": "tsx src/cli/main.ts"
+  },
+  "dependencies": {
+    "@ath-protocol/client": "workspace:*",
+    "@ath-protocol/types": "workspace:*",
+    "commander": "^14.0.0",
+    "jose": "^6.0.0"
+  },
+  "devDependencies": {
+    "@ath-protocol/server": "workspace:*",
+    "@hono/node-server": "^1.19.14",
+    "@types/node": "^22.0.0",
+    "hono": "^4.7.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "tsx": "^4.19.0"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/A7um/ATH.git",
+    "directory": "athx"
+  },
+  "homepage": "https://github.com/A7um/ATH/tree/main/athx",
+  "keywords": ["ath", "agent-trust-handshake", "ai", "cli", "oauth", "agent"]
+}
