@@ -18,6 +18,21 @@ export interface ATHXConfig {
   keyId?: string;
 }
 
+export type GatewayResolution =
+  | { kind: "url"; url: string }
+  | { kind: "named"; name: string; url: string }
+  | { kind: "unknown-name"; name: string; knownNames: string[] }
+  | { kind: "none" };
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function defaultConfig(): ATHXConfig {
   return { gateways: [] };
 }
@@ -55,15 +70,53 @@ export class Config {
   }
 
   getGatewayUrl(nameOrUrl?: string): string | undefined {
-    if (nameOrUrl && (nameOrUrl.startsWith("http://") || nameOrUrl.startsWith("https://"))) {
-      return nameOrUrl;
+    const r = this.resolveGateway(nameOrUrl);
+    return r.kind === "url" || r.kind === "named" ? r.url : undefined;
+  }
+
+  /**
+   * Resolve a gateway reference with explicit outcome, so callers can
+   * distinguish "no gateway configured" from "unknown name".
+   *
+   *   resolveGateway()                  — pick the default or first entry
+   *   resolveGateway("http://...")      — explicit URL passthrough
+   *   resolveGateway("name")            — named lookup (may be unknown)
+   */
+  resolveGateway(nameOrUrl?: string): GatewayResolution {
+    if (nameOrUrl && isHttpUrl(nameOrUrl)) {
+      return { kind: "url", url: nameOrUrl };
     }
-    const name = nameOrUrl || this.data.defaultGateway;
-    if (!name) return this.data.gateways[0]?.url;
-    return this.data.gateways.find((g) => g.name === name)?.url;
+
+    if (nameOrUrl) {
+      const entry = this.data.gateways.find((g) => g.name === nameOrUrl);
+      if (!entry) {
+        return {
+          kind: "unknown-name",
+          name: nameOrUrl,
+          knownNames: this.data.gateways.map((g) => g.name),
+        };
+      }
+      return { kind: "named", name: entry.name, url: entry.url };
+    }
+
+    const fallbackName =
+      this.data.defaultGateway ?? this.data.gateways[0]?.name;
+    if (!fallbackName) {
+      return { kind: "none" };
+    }
+    const entry = this.data.gateways.find((g) => g.name === fallbackName);
+    if (!entry) {
+      return { kind: "none" };
+    }
+    return { kind: "named", name: entry.name, url: entry.url };
   }
 
   setGateway(name: string, url: string): void {
+    if (!isHttpUrl(url)) {
+      throw new Error(
+        `Gateway URL must start with http:// or https:// (got: ${JSON.stringify(url)}).`,
+      );
+    }
     const existing = this.data.gateways.findIndex((g) => g.name === name);
     if (existing >= 0) {
       this.data.gateways[existing].url = url;

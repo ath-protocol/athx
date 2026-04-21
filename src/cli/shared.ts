@@ -76,9 +76,11 @@ export async function buildNativeClient(opts: {
   const store = loadCredentialStore(config);
   const cfg = config.get();
 
-  const url = opts.service || config.getGatewayUrl();
+  const url = opts.service;
   if (!url) {
-    throw new Error("No service URL. Use --service <url>");
+    throw new Error(
+      "No service URL for native mode. Use --service <url> (e.g. --service https://mail.example.com).",
+    );
   }
 
   const agentId = opts.agentId || cfg.agentId;
@@ -112,14 +114,41 @@ export function output(data: unknown, format: "json" | "text" = "text"): void {
   }
 }
 
-export function handleError(err: unknown): never {
-  if (err instanceof Error) {
-    const code = (err as { code?: string }).code;
-    const status = (err as { status?: number }).status;
-    const prefix = code ? `[${code}]` : status ? `[HTTP ${status}]` : "[ERROR]";
-    console.error(`${prefix} ${err.message}`);
-  } else {
-    console.error("Unknown error:", err);
+export function formatError(err: unknown): string {
+  if (!(err instanceof Error)) {
+    return `Unknown error: ${String(err)}`;
   }
+
+  const code = (err as { code?: string }).code;
+  const status = (err as { status?: number }).status;
+  const prefix = code ? `[${code}]` : status ? `[HTTP ${status}]` : "[ERROR]";
+
+  const detail = describeCause((err as { cause?: unknown }).cause);
+  const message = detail ? `${err.message} (${detail})` : err.message;
+  return `${prefix} ${message}`;
+}
+
+export function handleError(err: unknown): never {
+  console.error(formatError(err));
   process.exit(1);
+}
+
+function describeCause(cause: unknown, depth = 0): string | undefined {
+  if (!cause || depth > 3) return undefined;
+  if (cause instanceof Error) {
+    const code = (cause as { code?: string }).code;
+    const nested = describeCause((cause as { cause?: unknown }).cause, depth + 1);
+    const base = code ? `${code}: ${cause.message}` : cause.message;
+    return nested ? `${base} → ${nested}` : base;
+  }
+  if (typeof cause === "object") {
+    const obj = cause as { code?: unknown; message?: unknown };
+    if (typeof obj.code === "string" || typeof obj.message === "string") {
+      const code = typeof obj.code === "string" ? obj.code : undefined;
+      const message = typeof obj.message === "string" ? obj.message : undefined;
+      if (code && message) return `${code}: ${message}`;
+      return code ?? message;
+    }
+  }
+  return undefined;
 }

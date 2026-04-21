@@ -91,4 +91,46 @@ describe("Config", () => {
     snap.gateways.push({ name: "b", url: "https://b.example.com" });
     expect(cfg.get().gateways).toHaveLength(1);
   });
+
+  // Regression: BUG-002 — setGateway used to accept any string.
+  it("rejects non-http(s) URLs with a clear error and does not persist them", () => {
+    const cfg = new Config(tmpDir);
+    expect(() => cfg.setGateway("bad", "not a url")).toThrow(
+      /http:\/\/ or https:\/\//,
+    );
+    expect(cfg.get().gateways).toEqual([]);
+  });
+
+  it("accepts http:// and https:// URLs", () => {
+    const cfg = new Config(tmpDir);
+    cfg.setGateway("h", "http://example.com");
+    cfg.setGateway("s", "https://example.com/path");
+    expect(cfg.get().gateways.map((g) => g.name)).toEqual(["h", "s"]);
+  });
+
+  // Regression: BUG-003 — status used to treat unknown names as "no config".
+  it("resolveGateway distinguishes unknown-name from none", () => {
+    const cfg = new Config(tmpDir);
+    expect(cfg.resolveGateway().kind).toBe("none");
+
+    cfg.setGateway("a", "https://a.example.com");
+    const unknown = cfg.resolveGateway("does-not-exist");
+    expect(unknown.kind).toBe("unknown-name");
+    if (unknown.kind === "unknown-name") {
+      expect(unknown.name).toBe("does-not-exist");
+      expect(unknown.knownNames).toEqual(["a"]);
+    }
+
+    const named = cfg.resolveGateway("a");
+    expect(named.kind).toBe("named");
+    if (named.kind === "named") {
+      expect(named.url).toBe("https://a.example.com");
+    }
+
+    const explicit = cfg.resolveGateway("https://other.example.com");
+    expect(explicit.kind).toBe("url");
+    if (explicit.kind === "url") {
+      expect(explicit.url).toBe("https://other.example.com");
+    }
+  });
 });
