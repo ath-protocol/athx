@@ -18,9 +18,9 @@ export interface ATHXConfig {
   keyId?: string;
 }
 
-const DEFAULT_CONFIG: ATHXConfig = {
-  gateways: [],
-};
+function defaultConfig(): ATHXConfig {
+  return { gateways: [] };
+}
 
 export class Config {
   private configDir: string;
@@ -36,9 +36,9 @@ export class Config {
   private load(): ATHXConfig {
     try {
       const raw = fs.readFileSync(this.configPath, "utf-8");
-      return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+      return { ...defaultConfig(), ...JSON.parse(raw) };
     } catch {
-      return { ...DEFAULT_CONFIG };
+      return defaultConfig();
     }
   }
 
@@ -48,7 +48,10 @@ export class Config {
   }
 
   get(): ATHXConfig {
-    return { ...this.data };
+    return {
+      ...this.data,
+      gateways: this.data.gateways.map((g) => ({ ...g })),
+    };
   }
 
   getGatewayUrl(nameOrUrl?: string): string | undefined {
