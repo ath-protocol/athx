@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/node/v/athx.svg)](https://nodejs.org)
 
-Headless CLI client for the [ATH (Agent Trust Handshake) protocol](https://github.com/A7um/ATH) — supports both **gateway** and **native** deployment modes.
+Headless CLI client for the [ATH (Agent Trust Handshake) protocol](https://github.com/ath-protocol/agent-trust-handshake-protocol) — supports both **gateway** and **native** deployment modes.
 
 `athx` is to ATH what [acpx](https://github.com/openclaw/acpx) is to ACP: an opinionated client layer + CLI on top of the [official TypeScript SDK](https://github.com/ath-protocol/typescript-sdk).
 
@@ -139,22 +139,28 @@ Both clients share: `register()`, `authorize()`, `exchangeToken()`, `revoke()`, 
 
 ## Development
 
-This package lives in the [ATH monorepo](https://github.com/A7um/ATH). To develop:
+`athx` is a standalone repository. It depends on the [`@ath-protocol/*` TypeScript SDK](https://github.com/ath-protocol/typescript-sdk) and, for end-to-end tests, the [reference ATH gateway](https://github.com/ath-protocol/gateway).
 
 ```bash
-git clone https://github.com/A7um/ATH.git
-cd ATH
+git clone https://github.com/ath-protocol/athx.git
+cd athx
 pnpm install
 
-# Build SDK + athx
-pnpm --filter @ath-protocol/types build
-pnpm --filter @ath-protocol/client build
-pnpm --filter @ath-protocol/server build
-pnpm --filter athx build
+# Build athx
+pnpm build
 
-# Run tests (starts gateway + mock-oauth + native service)
-pnpm --filter athx test
+# Run the CLI in development
+pnpm dev -- --help
 ```
+
+### Running end-to-end tests
+
+The e2e suite (`__tests__/e2e.test.ts`) starts a real ATH gateway, a mock OAuth2 server, and an ATH-native service. Those components live in separate repos:
+
+- [`ath-protocol/typescript-sdk`](https://github.com/ath-protocol/typescript-sdk) — `@ath-protocol/{types,client,server}`
+- [`ath-protocol/gateway`](https://github.com/ath-protocol/gateway) — reference gateway + bundled mock OAuth2 server
+
+To run the full suite, check out those repos next to `athx` and wire them into a pnpm workspace, or vendor them locally. Without them, only the CLI can be built and exercised directly (`pnpm build`, `pnpm dev`).
 
 ## License
 

@@ -39,9 +39,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/A7um/ATH.git",
-    "directory": "athx"
+    "url": "https://github.com/ath-protocol/athx.git"
   },
-  "homepage": "https://github.com/A7um/ATH/tree/main/athx",
+  "homepage": "https://github.com/ath-protocol/athx",
   "keywords": ["ath", "agent-trust-handshake", "ai", "cli", "oauth", "agent"]
 }

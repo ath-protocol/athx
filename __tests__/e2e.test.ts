@@ -1,15 +1,18 @@
 /**
  * E2E Test: athx CLI — both gateway and native mode.
  *
- * Test infrastructure required (provided by the ATH monorepo workspace):
- *   - packages/gateway (ATH gateway server)
- *   - packages/mock-oauth (real OAuth2 server with PKCE)
- *   - packages/ath-server (@ath-protocol/server handlers)
+ * athx is a standalone repository. This suite requires the following external
+ * components to be available alongside it (e.g. checked out next to athx and
+ * wired into a local pnpm workspace, or vendored):
+ *   - ath-protocol/gateway          — reference gateway server + bundled mock OAuth2
+ *     (https://github.com/ath-protocol/gateway)
+ *   - @ath-protocol/server          — native-mode ATH handlers
+ *     (https://github.com/ath-protocol/typescript-sdk)
  *
  * Starts three real HTTP servers, then exercises athx through the full
  * trusted handshake in both deployment modes. No mock/stub behavior.
  *
- * Run from the ATH monorepo root: pnpm --filter athx test
+ * See the README "Running end-to-end tests" section for setup details.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFile } from "node:child_process";
@@ -21,7 +24,7 @@ import { serve } from "@hono/node-server";
 import type { ServerType } from "@hono/node-server";
 import { Hono } from "hono";
 
-// Gateway + mock-oauth imports (from ATH monorepo workspace)
+// Gateway + mock-oauth imports (from the ath-protocol/gateway repo checked out alongside athx)
 import { app as gatewayApp } from "../../packages/gateway/src/app.js";
 import { app as oauthApp } from "../../packages/mock-oauth/src/server.js";
 import { agentStore } from "../../packages/gateway/src/registry/agent-store.js";
