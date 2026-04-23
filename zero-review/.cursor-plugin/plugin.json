@@ -1,0 +1,8 @@
+{
+  "name": "zero-review",
+  "version": "5.1.0",
+  "description": "Auto-dev platform for agent-majority software teams, aligned with ATH Protocol v0.1. Four skills (auto-dev, auto-req, auto-test, auto-triage), four roles (dev-agent, req-agent, user-agent, triage-agent), and cross-skill contracts including ATH protocol reference. Humans supply requirements and intervene at key decision points; agents handle everything else.",
+  "author": {
+    "name": "system"
+  }
+}

@@ -1,15 +1,10 @@
 /**
  * E2E Test: athx CLI — both gateway and native mode.
  *
- * Test infrastructure required (provided by the ATH monorepo workspace):
- *   - packages/gateway (ATH gateway server)
- *   - packages/mock-oauth (real OAuth2 server with PKCE)
- *   - packages/ath-server (@ath-protocol/server handlers)
+ * Self-contained: builds mock OAuth, gateway, and native servers
+ * using @ath-protocol/server handlers. No external package imports.
  *
- * Starts three real HTTP servers, then exercises athx through the full
- * trusted handshake in both deployment modes. No mock/stub behavior.
- *
- * Run from the ATH monorepo root: pnpm --filter athx test
+ * Run: pnpm test
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFile } from "node:child_process";
@@ -17,44 +12,42 @@ import { promisify } from "node:util";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import crypto from "node:crypto";
 import { serve } from "@hono/node-server";
 import type { ServerType } from "@hono/node-server";
 import { Hono } from "hono";
 
-// Gateway + mock-oauth imports (from ATH monorepo workspace)
-import { app as gatewayApp } from "../../packages/gateway/src/app.js";
-import { app as oauthApp } from "../../packages/mock-oauth/src/server.js";
-import { agentStore } from "../../packages/gateway/src/registry/agent-store.js";
-import { tokenStore } from "../../packages/gateway/src/auth/token.js";
-import { sessionStore } from "../../packages/gateway/src/auth/session-store.js";
-import { oauthBridge } from "../../packages/gateway/src/oauth/client.js";
-import { providerStore } from "../../packages/gateway/src/providers/store.js";
-
-// @ath-protocol/server (for building the native ATH service in tests)
 import {
   createATHHandlers,
   createServiceDiscoveryDocument,
+  createProxyHandler,
   InMemoryAgentRegistry,
   InMemoryTokenStore,
   InMemorySessionStore,
+  InMemoryProviderTokenStore,
 } from "@ath-protocol/server";
 
-const exec = promisify(execFile);
-
-const GATEWAY_PORT = 15000;
 const OAUTH_PORT = 15001;
+const GATEWAY_PORT = 15000;
 const NATIVE_PORT = 15002;
-const GATEWAY_URL = `http://localhost:${GATEWAY_PORT}`;
+const UPSTREAM_PORT = 15003;
 const OAUTH_URL = `http://localhost:${OAUTH_PORT}`;
+const GATEWAY_URL = `http://localhost:${GATEWAY_PORT}`;
 const NATIVE_URL = `http://localhost:${NATIVE_PORT}`;
+const UPSTREAM_URL = `http://localhost:${UPSTREAM_PORT}`;
 const AGENT_ID = "https://athx-e2e-test.example.com/.well-known/agent.json";
+const OAUTH_CLIENT_ID = "ath-gateway-client";
+const OAUTH_CLIENT_SECRET = "ath-gateway-secret";
 
 const CLI_PATH = path.resolve(import.meta.dirname, "../dist/cli/main.js");
 
-let gatewayServer: ServerType;
 let oauthServer: ServerType;
+let gatewayServer: ServerType;
 let nativeServer: ServerType;
+let upstreamServer: ServerType;
 let configDir: string;
+
+const exec = promisify(execFile);
 
 async function athx(...args: string[]): Promise<{ stdout: string; stderr: string }> {
   const env = { ...process.env, HOME: configDir, XDG_CONFIG_HOME: configDir };
@@ -64,6 +57,186 @@ async function athx(...args: string[]): Promise<{ stdout: string; stderr: string
 async function athxJson(...args: string[]): Promise<unknown> {
   const { stdout } = await athx(...args, "--format", "json");
   return JSON.parse(stdout);
+}
+
+function buildMockOAuthServer() {
+  const app = new Hono();
+  const codes = new Map<string, {
+    client_id: string; redirect_uri: string; scope: string;
+    code_challenge?: string; code_challenge_method?: string;
+  }>();
+  const tokens = new Map<string, { scope: string }>();
+
+  app.get("/health", (c) => c.json({ status: "ok" }));
+
+  app.get("/authorize", (c) => {
+    const clientId = c.req.query("client_id");
+    const redirectUri = c.req.query("redirect_uri");
+    const scope = c.req.query("scope") || "";
+    const state = c.req.query("state") || "";
+    const codeChallenge = c.req.query("code_challenge");
+    const codeChallengeMethod = c.req.query("code_challenge_method");
+    const autoApprove = c.req.query("auto_approve") === "true";
+
+    if (!autoApprove) return c.json({ error: "interaction_required" }, 400);
+
+    const code = crypto.randomBytes(16).toString("hex");
+    codes.set(code, {
+      client_id: clientId!, redirect_uri: redirectUri || "",
+      scope, code_challenge: codeChallenge, code_challenge_method: codeChallengeMethod,
+    });
+    const redirect = new URL(redirectUri!);
+    redirect.searchParams.set("code", code);
+    if (state) redirect.searchParams.set("state", state);
+    return c.redirect(redirect.toString());
+  });
+
+  app.post("/token", async (c) => {
+    const contentType = c.req.header("content-type") || "";
+    let grantType: string, code: string, clientId: string, clientSecret: string, codeVerifier: string | undefined;
+
+    if (contentType.includes("application/json")) {
+      const json = await c.req.json() as Record<string, string>;
+      grantType = json.grant_type; code = json.code;
+      clientId = json.client_id; clientSecret = json.client_secret;
+      codeVerifier = json.code_verifier;
+    } else {
+      const form = await c.req.parseBody();
+      grantType = form["grant_type"] as string; code = form["code"] as string;
+      clientId = form["client_id"] as string; clientSecret = form["client_secret"] as string;
+      codeVerifier = form["code_verifier"] as string | undefined;
+    }
+
+    if (grantType !== "authorization_code") return c.json({ error: "unsupported_grant_type" }, 400);
+    if (clientId !== OAUTH_CLIENT_ID || clientSecret !== OAUTH_CLIENT_SECRET) return c.json({ error: "invalid_client" }, 401);
+
+    const authCode = codes.get(code);
+    if (!authCode) return c.json({ error: "invalid_grant" }, 400);
+
+    if (authCode.code_challenge && codeVerifier) {
+      const computed = authCode.code_challenge_method === "S256"
+        ? crypto.createHash("sha256").update(codeVerifier).digest("base64url")
+        : codeVerifier;
+      if (computed !== authCode.code_challenge) {
+        codes.delete(code);
+        return c.json({ error: "invalid_grant", message: "PKCE failed" }, 400);
+      }
+    }
+    codes.delete(code);
+
+    const accessToken = `mock_at_${crypto.randomBytes(24).toString("hex")}`;
+    tokens.set(accessToken, { scope: authCode.scope });
+    return c.json({ access_token: accessToken, token_type: "Bearer", expires_in: 3600, scope: authCode.scope });
+  });
+
+  app.get("/.well-known/oauth-authorization-server", (c) => c.json({
+    issuer: OAUTH_URL,
+    authorization_endpoint: `${OAUTH_URL}/authorize`,
+    token_endpoint: `${OAUTH_URL}/token`,
+    scopes_supported: ["repo", "read:user", "user:email", "mail:read", "mail:send", "mail:delete"],
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code"],
+    code_challenge_methods_supported: ["S256", "plain"],
+  }));
+
+  return app;
+}
+
+function buildUpstreamService() {
+  const app = new Hono();
+  app.get("/health", (c) => c.json({ status: "ok" }));
+  app.get("/userinfo", (c) => c.json({ login: "test-user", name: "Test User", email: "test@example.com" }));
+  app.get("/api/repos", (c) => c.json([{ id: 1, name: "ath-gateway", full_name: "test-user/ath-gateway" }]));
+  return app;
+}
+
+function buildGatewayService() {
+  const app = new Hono();
+  const registry = new InMemoryAgentRegistry();
+  const tokenStore = new InMemoryTokenStore();
+  const sessionStore = new InMemorySessionStore();
+  const providerTokenStore = new InMemoryProviderTokenStore();
+
+  const handlers = createATHHandlers({
+    registry, tokenStore, sessionStore, providerTokenStore,
+    config: {
+      audience: GATEWAY_URL,
+      callbackUrl: `${GATEWAY_URL}/ath/callback`,
+      availableScopes: ["repo", "read:user", "user:email", "read:org"],
+      appId: "github",
+      skipAttestationVerification: true,
+      oauth: {
+        authorize_endpoint: `${OAUTH_URL}/authorize`,
+        token_endpoint: `${OAUTH_URL}/token`,
+        client_id: OAUTH_CLIENT_ID,
+        client_secret: OAUTH_CLIENT_SECRET,
+      },
+    },
+  });
+
+  app.get("/.well-known/ath.json", (c) => c.json({
+    ath_version: "0.1",
+    gateway_id: GATEWAY_URL,
+    agent_registration_endpoint: `${GATEWAY_URL}/ath/agents/register`,
+    supported_providers: [{
+      provider_id: "github", display_name: "GitHub", categories: [],
+      available_scopes: ["repo", "read:user", "user:email", "read:org"],
+      auth_mode: "OAUTH2", agent_approval_required: true,
+    }],
+  }));
+
+  app.get("/health", (c) => c.json({ status: "ok" }));
+
+  app.post("/ath/agents/register", async (c) => {
+    const r = await handlers.register({ method: "POST", path: "/ath/agents/register", headers: {}, body: await c.req.json() });
+    return c.json(r.body, r.status as any);
+  });
+  app.post("/ath/authorize", async (c) => {
+    const r = await handlers.authorize({ method: "POST", path: "/ath/authorize", headers: {}, body: await c.req.json() });
+    return c.json(r.body, r.status as any);
+  });
+  app.get("/ath/callback", async (c) => {
+    const query: Record<string, string> = {};
+    for (const [k, v] of Object.entries(c.req.query())) { if (v) query[k] = v; }
+    const r = await handlers.callback({ method: "GET", path: "/ath/callback", headers: {}, query, url: c.req.url });
+    if (r.status === 302 && r.headers?.Location) return c.redirect(r.headers.Location);
+    return c.json(r.body, r.status as any);
+  });
+  app.post("/ath/token", async (c) => {
+    const r = await handlers.token({ method: "POST", path: "/ath/token", headers: {}, body: await c.req.json() });
+    return c.json(r.body, r.status as any);
+  });
+  app.post("/ath/revoke", async (c) => {
+    const r = await handlers.revoke({ method: "POST", path: "/ath/revoke", headers: {}, body: await c.req.json() });
+    return c.json(r.body, r.status as any);
+  });
+
+  const proxy = createProxyHandler({
+    tokenStore,
+    providerTokenStore,
+    upstreams: { github: UPSTREAM_URL },
+  });
+
+  app.all("/ath/proxy/:provider/*", async (c) => {
+    const headers: Record<string, string> = {};
+    c.req.raw.headers.forEach((v, k) => { headers[k] = v; });
+    const query: Record<string, string> = {};
+    for (const [k, v] of Object.entries(c.req.query())) { if (v) query[k] = v; }
+    let body: unknown = undefined;
+    if (c.req.method !== "GET" && c.req.method !== "HEAD") {
+      try { body = await c.req.json(); } catch { body = undefined; }
+    }
+    const r = await proxy({ method: c.req.method, path: c.req.path, headers, query, body });
+    const out = new Response(
+      typeof r.body === "string" || r.body instanceof ArrayBuffer
+        ? (r.body as BodyInit)
+        : JSON.stringify(r.body),
+      { status: r.status, headers: r.headers },
+    );
+    return out;
+  });
+
+  return app;
 }
 
 function buildNativeService() {
@@ -87,8 +260,8 @@ function buildNativeService() {
       oauth: {
         authorize_endpoint: `${OAUTH_URL}/authorize`,
         token_endpoint: `${OAUTH_URL}/token`,
-        client_id: "ath-gateway-client",
-        client_secret: "ath-gateway-secret",
+        client_id: OAUTH_CLIENT_ID,
+        client_secret: OAUTH_CLIENT_SECRET,
       },
     },
   });
@@ -106,33 +279,30 @@ function buildNativeService() {
   app.get("/health", (c) => c.json({ status: "ok" }));
 
   app.post("/ath/agents/register", async (c) => {
-    const res = await handlers.register({ method: "POST", path: "/ath/agents/register", body: await c.req.json() });
-    return c.json(res.body, res.status as 200);
+    const r = await handlers.register({ method: "POST", path: "/ath/agents/register", headers: {}, body: await c.req.json() });
+    return c.json(r.body, r.status as any);
   });
-
   app.post("/ath/authorize", async (c) => {
-    const res = await handlers.authorize({ method: "POST", path: "/ath/authorize", body: await c.req.json() });
-    return c.json(res.body, res.status as 200);
+    const r = await handlers.authorize({ method: "POST", path: "/ath/authorize", headers: {}, body: await c.req.json() });
+    return c.json(r.body, r.status as any);
   });
-
   app.get("/ath/callback", async (c) => {
-    const query = Object.fromEntries(new URL(c.req.url, NATIVE_URL).searchParams.entries());
-    const res = await handlers.callback({ method: "GET", path: "/ath/callback", query });
-    if (res.redirect) return c.redirect(res.redirect);
-    return c.json(res.body || {}, res.status as 200);
+    const query: Record<string, string> = {};
+    for (const [k, v] of Object.entries(c.req.query())) { if (v) query[k] = v; }
+    const r = await handlers.callback({ method: "GET", path: "/ath/callback", headers: {}, query, url: c.req.url });
+    if (r.status === 302 && r.headers?.Location) return c.redirect(r.headers.Location);
+    return c.json(r.body, r.status as any);
   });
-
   app.post("/ath/token", async (c) => {
-    const res = await handlers.token({ method: "POST", path: "/ath/token", body: await c.req.json() });
-    return c.json(res.body, res.status as 200);
+    const r = await handlers.token({ method: "POST", path: "/ath/token", headers: {}, body: await c.req.json() });
+    return c.json(r.body, r.status as any);
   });
-
   app.post("/ath/revoke", async (c) => {
-    const res = await handlers.revoke({ method: "POST", path: "/ath/revoke", body: await c.req.json() });
-    return c.json(res.body || {}, res.status as 200);
+    const r = await handlers.revoke({ method: "POST", path: "/ath/revoke", headers: {}, body: await c.req.json() });
+    return c.json(r.body, r.status as any);
   });
 
-  app.get("/api/inbox", (c) => {
+  app.get("/api/inbox", async (c) => {
     const auth = c.req.header("authorization");
     if (!auth) return c.json({ error: "unauthorized" }, 401);
     return c.json([
@@ -146,51 +316,31 @@ function buildNativeService() {
 
 beforeAll(async () => {
   configDir = fs.mkdtempSync(path.join(os.tmpdir(), "athx-e2e-"));
-  process.env.ATH_GATEWAY_HOST = GATEWAY_URL;
 
-  agentStore.clear();
-  tokenStore.clear();
-  sessionStore.clear();
-  oauthBridge.clearTokens();
-  providerStore.clearCache();
-
-  providerStore.set("github", {
-    display_name: "GitHub (E2E)",
-    available_scopes: ["repo", "read:user", "user:email", "read:org"],
-    authorize_endpoint: `${OAUTH_URL}/authorize`,
-    token_endpoint: `${OAUTH_URL}/token`,
-    api_base_url: OAUTH_URL,
-    client_id: "ath-gateway-client",
-    client_secret: "ath-gateway-secret",
-  });
-
-  oauthServer = serve({ fetch: oauthApp.fetch, port: OAUTH_PORT, hostname: "127.0.0.1" });
-  gatewayServer = serve({ fetch: gatewayApp.fetch, port: GATEWAY_PORT, hostname: "127.0.0.1" });
+  oauthServer = serve({ fetch: buildMockOAuthServer().fetch, port: OAUTH_PORT, hostname: "127.0.0.1" });
+  gatewayServer = serve({ fetch: buildGatewayService().fetch, port: GATEWAY_PORT, hostname: "127.0.0.1" });
   nativeServer = serve({ fetch: buildNativeService().fetch, port: NATIVE_PORT, hostname: "127.0.0.1" });
+  upstreamServer = serve({ fetch: buildUpstreamService().fetch, port: UPSTREAM_PORT, hostname: "127.0.0.1" });
 
   for (let i = 0; i < 30; i++) {
     try {
-      const [gw, oauth, nat] = await Promise.all([
+      const [gw, oauth, nat, up] = await Promise.all([
         fetch(`${GATEWAY_URL}/health`).then((r) => r.ok),
         fetch(`${OAUTH_URL}/health`).then((r) => r.ok),
         fetch(`${NATIVE_URL}/health`).then((r) => r.ok),
+        fetch(`${UPSTREAM_URL}/health`).then((r) => r.ok),
       ]);
-      if (gw && oauth && nat) break;
+      if (gw && oauth && nat && up) break;
     } catch { /* retry */ }
     await new Promise((r) => setTimeout(r, 200));
   }
 }, 30_000);
 
 afterAll(async () => {
-  gatewayServer?.close();
   oauthServer?.close();
+  gatewayServer?.close();
   nativeServer?.close();
-  agentStore.clear();
-  tokenStore.clear();
-  sessionStore.clear();
-  oauthBridge.clearTokens();
-  providerStore.delete("github");
-  providerStore.clearCache();
+  upstreamServer?.close();
   fs.rmSync(configDir, { recursive: true, force: true });
 });
 
@@ -243,7 +393,7 @@ describe("Gateway mode", () => {
     expect(token.effective_scopes).toContain("repo");
   });
 
-  it("proxy — reaches real OAuth server", async () => {
+  it("proxy — reaches upstream via gateway", async () => {
     const data = (await athxJson(
       "proxy", "--gateway", GATEWAY_URL, "--agent-id", AGENT_ID,
       "github", "GET", "/userinfo",
