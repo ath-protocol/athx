@@ -1,0 +1,24 @@
+{
+  "auto_escalate_p0": true,
+  "sponsor_approval_required": ["P0", "P1"],
+  "duplicate_confidence_threshold": "strong",
+  "max_batch_size": 50,
+  "classification_paradigm_map": {
+    "bugfix": "bugfix/hypothesis-driven",
+    "enhancement": "enhancement/delta-design",
+    "addition": "addition/lightweight",
+    "greenfield": "dev/architecture-first"
+  },
+  "ath_protocol_security_keywords": [
+    "attestation bypass",
+    "token leak",
+    "provider token exposed",
+    "scope intersection",
+    "PKCE missing",
+    "jti replay",
+    "agent identity mismatch",
+    "X-ATH-Agent-ID",
+    "provider_mismatch"
+  ],
+  "ath_protocol_auto_p0": true
+}
