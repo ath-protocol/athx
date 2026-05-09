@@ -1,6 +1,6 @@
 {
-  "name": "athx",
-  "version": "0.2.0",
+  "name": "@ath-protocol/athx",
+  "version": "0.1.0",
   "description": "Headless CLI client for the ATH (Agent Trust Handshake) protocol — gateway and native mode",
   "type": "module",
   "main": "./dist/index.js",
