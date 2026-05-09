@@ -38,7 +38,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish athx
-        run: pnpm publish --filter athx --access public --no-git-checks
+      - name: Publish @ath-protocol/athx
+        run: pnpm publish --filter @ath-protocol/athx --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
