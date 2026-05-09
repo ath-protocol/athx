@@ -5,6 +5,10 @@ on:
     tags:
       - "v*"
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -15,8 +19,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: pnpm
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
       - run: pnpm install --frozen-lockfile
@@ -24,6 +27,6 @@ jobs:
       - run: pnpm -r run build
 
       - name: Publish @ath-protocol/athx
-        run: pnpm publish --filter @ath-protocol/athx --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          pnpm pack
+          npm publish ath-protocol-athx-*.tgz --access public
