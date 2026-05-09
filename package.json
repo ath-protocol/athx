@@ -43,5 +43,6 @@
     "directory": "athx"
   },
   "homepage": "https://github.com/A7um/ATH/tree/main/athx",
-  "keywords": ["ath", "agent-trust-handshake", "ai", "cli", "oauth", "agent"]
+  "keywords": ["ath", "agent-trust-handshake", "ai", "cli", "oauth", "agent"],
+  "packageManager": "pnpm@9.15.0"
 }
